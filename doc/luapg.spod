@@ -1,0 +1,281 @@
+=S1 NAME
+
+luapg - a full-featured Postgresql client interface for Lua
+
+=S1 SYNOPSIS
+
+	require 'luapg'
+
+=S2 Example program
+
+	local lp = require 'luapg'
+	
+	local con = lp.connect("dbname=postgres")
+	result = con:run("select city from zipcodes where state = $1", "CA")
+
+=S1 About LuaPG
+
+LuaPG is a full-featured Postgresql client library for Lua written against the
+Ln[libpq|http://www.postgresql.org/docs/8.4/interactive/libpq.html] C library.  Many of
+the conventions of this C library are carried over into LuaPG, so you will be asked to
+refer to the `libpg` reference section of the PostgreSQL documentation for more
+detailed usage information.  
+
+=S2 Features
+
+=list n.
+
+(Fill in here)
+
+=S2 Data Types
+
+Several PostgreSQL data types map naturally to Lua data types.  Values of these types
+retrieved from a query result will automatically be returned as appropriate Lua data
+types by default.      
+
+=list n.
+
+* A value of a database type indicating an integer (`integer`, `serial`, etc.) or
+floating-point (`numeric`, `double precision`, etc.), is returned as a Lua
+`number`.  
+
+* A values of database type `boolean` is returned as a Lua `boolean`.
+
+* All other values are returned as a Lua `string` unless, for certain limited
+types, the result object is configured to return values of particular fields as special
+Lua types.  See the documentation for the result object method, Ln[setTypeMap|result:setTypeMap].
+
+=S1 Regular Command Execution
+
+=S2 Database Connection
+
+The LuaPG library provides one main `connect` function for connecting to a database.
+
+=list
+
+* luapg.connect (connInfo)
+
+The `connInfo` parameter is a connection string consisting of a space separated `keyword
+= value` set of parameters. Any number of parameters can be left out and the connection
+string may even be empty, in which cases defaults are used. See the C library `PQconnectdb`
+Ln[http://www.postgresql.org/docs/8.4/interactive/libpq-connect.html]
+function for the meaning of the connection string.      
+
+`connect` returns a connection object for running queries and actions on this database.  
+
+=S2 Running Queries and Actions
+
+Below are listed the commonly used synchronous command methods for running queries and
+action with a connection object, `con`.  These methods all submit a command to the
+database server and wait for the result.    
+
+=list
+
+* connection:run (command, [param, ...])
+
+Runs command, with optional parameter replacement values being passed to match the
+potential placeholders in the command string.  If `run` is passed only a command string
+without additional argument values, then this command string may include multiple SQL
+commands (separated by semicolons).  Multiple commands sent in this way are processed in
+a single transaction, unless there are explicit BEGIN/COMMIT commands included in the
+command string to divide it into multiple transactions.
+
+The meaning of the return value is dependent on whether the command string represents a
+query (SELECT or SHOW command) or non-query command (INSERT, UPDATE, DELETE, or data
+definition command).  
+
+A query command returns tuples on success. Running a successful query command will return
+a Ln[result object|Retrieving Query Results] representing these tuples.
+
+A non-query command will return the number of rows affected by the command for commands
+that affect rows or the empty string for commands that don't.  Usually for non-query
+commands, the important information conveyed by the return value is whether the command was
+successful or not.
+
+Since `run` returns `false`, on error, as its first value, testing this first returned
+value as a boolean, will indicate whether the command was run successfully or not.  If a
+`false` value is returned, then an error message string is also returned as the second
+value.
+
+	local result, error = con:run("select code from zipcodes where city = 'Denver'")
+	if result then
+	  print(result.code)
+	else
+	  print("Error in query: " .. error)
+	end
+
+=S3 Parameter replacement values
+
+The command string placeholders are
+entered as such, ($1, $2, ...), to indicate the location that the parameter values will
+fill before running the command.  For example:  
+
+	local city = "Why"
+	local state = "AZ"
+	local code = 85321
+	con:run("insert into zipcodes values ($1, $2, $3)", city, state, code)
+
+This will have the same effect as running:
+
+	con:run("insert into zipcodes values ('Why', 'AZ', '85321')")
+
+-or-
+
+	con:run("insert into zipcodes values ('" .. city .. "', '" .. state .. "', '" .. code .. "')")
+
+However, there are advantages for separating parameter values from the command string,
+such as avoiding the tedious and error-prone quoting and escaping that is usually
+mandatory when the only alternative is composing a command string directly.
+
+=S2 Using Prepared Statements
+
+=list
+
+* connection:prepare (command)
+
+Creates a prepared statement on the database server and returns an object used to run this
+command at a later time. This feature allows commands that will be used repeatedly, to be
+parsed and planned on the database server just once, rather than each time they are
+executed. The command string must be a single SQL command.
+
+	local prep = con:prepare("select code from zipcodes where city = $1")
+	-- Some later time
+	local result = prep:run("Denver")
+
+=S3 Executing a Prepared Statement
+
+Prepared statements are executed with a prepared object that is returned from the
+connection object's prepare method.
+
+=list
+
+* prepared:run ([param, ...])
+
+Runs the previously prepared command with optional replacement values.  The behavior is identical
+to the connection object run method with parameter replacement values.
+
+* prepared:deallocate ()
+
+Deallocates the prepared statement on the server. If you do not explicitly deallocate the
+prepared statement, then it is deallocated automatically when the database session ends,
+so this is only really necessary on long running sessions when it's a priority to
+release unused prepared statement memory as soon as possible.   
+  
+=S2 Retrieving Query Results
+
+A successful query will return 0 or more tuples (rows) accessed by the result object
+returned from the `run` method. The result object has the tuples enumerated like an array table,
+starting from 1, with `#result` being the number of tuples in the result set.
+
+	local result, error = con:run("select city, state, code from zipcodes")
+	if result then
+	  for i = 1,#result do
+		  print(result[i].city .. " has zipcode " .. result[i][3])
+	  end
+	else
+	  print("Error in query: " .. error)
+	end
+
+This example highlights the way to retrieve query results directly.  Tuples are indexed
+like an array and field (column) values can either be accessed by index or by name. In
+the previous example, the `code` table field could be accessed through the results as
+either `result[i][3]` or `result[i].code`.
+
+The result object provides several methods for operating on the result set.
+
+=list
+
+* result:tuples ()
+
+Returns an iterator object for iterating through each result tuple.
+
+	local result, error = con:run("select city, state, code from zipcodes")
+	if result then
+		for row in result:tuples() do
+			print(row.city .. " has zipcode " .. row.code)
+		end
+	else
+		print("Error in query: " .. error)
+	end
+
+* result:fields ()
+
+Returns an array of field names for this query result.
+
+	local fields = result:fields()
+	for i = 1,#fields do
+		print(fields[i])
+	end
+
+* result:setTypeMap ([mapString])
+
+Takes a formatted string that explicitly specifies the special types for certain fields by
+their field names.  If you know the data type of a named field in the result set, and it is of
+a type that can be represented by an alternate Lua representation or a special Lua object,
+then you may be explicit about which of these fields you want to have this alternate
+representation.  One would call this method as a first configuration step on a result object
+before retrieving values from the result object.
+
+For example, the very flexible PostgreSQL `numeric` type, (also referred to as
+`decimal`), can store numbers with up to 1000 digits of precision. The default Lua
+representation for a `numeric` value in the result set is naturally a Lua `number`.
+However, in the off chance that you have a field of type `numeric` with values that
+might not fit into a Lua `number` (double-precision floating-point), then you will want
+`numeric` data values from this field to be returned as Lua `string` values.     
+
+The `mapString` argument has the format:
+
+	fieldName1:specialType,fieldName2:specialType,...
+
+In the example of a result set with a field named `amount` and with a database type of
+`numeric`, by default, the `amount` field value will be retrieved as a Lua `number`.
+To set the result object for retrieving this field value as a lua `string`:  
+
+	result.setTypeMap("amount:String")
+
+Then go about retrieving values from the result object as usual.
+
+All fields can have their values returned as Lua `strings` in this way.  The other
+numeric database types that are returned as Lua `number` by default, but have the potential of
+overflowing a Lua `number` are `bigint` and `bigserial`.
+
+The other use of `setTypeMap` is to enable retieval of database values of certain types
+as special   Lua objects, which I'll discuss in the Ln[Special Lua Objects for Database
+Types] section.    
+
+=S1 Asynchronous Command Execution
+
+=S2 filler 
+
+=S1 Additional Information
+
+=S2 Special Lua Objects for Database Types
+
+=S2 Handling Transactions
+
+As explained in the `run` method section, by default, every execution of an SQL command
+string encompassing one or more commands, is processed as a single transaction.  This
+automatic transaction mode is the most common way of interacting with the database, but
+when you need a transaction to include many separated commands/queries you may easily delineate
+your own transaction boundaries by explicitly embedding `BEGIN;` and `COMMIT;` in your
+command strings.
+
+	local result = con:run("BEGIN; select code from zipcodes where city = $1", city)
+	-- Misc processing
+	con:run("update zipcodes set code = $1 where city = $2; COMMIT", newcode, city)
+
+This example runs both commands within the same transaction, delineated by the `BEGIN;`
+and `COMMIT;`  commands. Leaving out these commands would have put each command in its
+own  transaction and possibly have resulted in inconsistent data.  See the Ln[PostgreSQL
+documentation] about the concept of transactions and other guidance about using them
+explicitly.    
+
+=S2 Creating and Using Cursors
+
+=table foobar
+
+name,age,city
+Jon Strait,36,Vancouver
+Marilou Strait,45,Vancouver
+Daisy Strait,4,Vancouver
+
