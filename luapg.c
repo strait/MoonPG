@@ -10,6 +10,7 @@ connect (lua_State *L)
 	DBSession *sess = lua_newuserdata(L, sizeof(DBSession));
 	sess->conn = PQconnectdb(cinfo);
 	sess->sid = 1;
+	sess->getbyarray = 0;
 
 	if (PQstatus(sess->conn) != CONNECTION_OK) {
 		lua_pushnil(L);

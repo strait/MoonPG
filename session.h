@@ -7,5 +7,6 @@
 typedef struct {
 	PGconn *conn;
 	unsigned int sid; // sequence for statement IDs.
+	int getbyarray;
 } DBSession;
 

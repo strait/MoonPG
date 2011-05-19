@@ -98,7 +98,7 @@ getPrepared (lua_State *L)
 }  
 
 static int
-processResultStatus (lua_State *L, PGresult *result, ExecStatusType status, PGconn *conn)
+processResultStatus (lua_State *L, PGresult *result, ExecStatusType status, DBSession *s)
 {
 	int ret = 1;
 	if (status == PGRES_COMMAND_OK) {
@@ -107,22 +107,50 @@ processResultStatus (lua_State *L, PGresult *result, ExecStatusType status, PGco
 		PQclear(result);
 	}
 	else if (status == PGRES_TUPLES_OK) {
-		Result *r = lua_newuserdata(L, sizeof *r);
-		r->pgres = result;
-		r->paramtypes = NULL;
-		// Set up the columntypes array for future access.
+		// Create a table with all the result data
+		int nt = PQntuples(result);
 		int nf = PQnfields(result);
-		r->columntypes = malloc(nf * sizeof *r->columntypes);
-		for (int i = 0; i < nf; i++) {
-			r->columntypes[i] = PQftype(result, i);
+		PGtype columnType[nf];
+		char *columnName[nf];
+
+		lua_createtable(L, nt, 1); // Result table
+		lua_createtable(L, nf, 0); // Field names table
+
+		for(int i = 0; i < nf; i++) {
+			char *fname = PQfname(result, i);
+			columnType[i] = PQftype(result, i);
+			columnName[i] = fname;
+			lua_pushstring(L, fname);
+			lua_rawseti(L, -2, i+1);
 		}
-		luaL_getmetatable(L, RES_REGNAME);
-		lua_setmetatable(L, -2);
+		// Insert the fieldNames table into the result table.
+		lua_pushstring(L, "fields");
+		lua_insert(L, -2);
+		lua_rawset(L, -3);
+		// Inset the tuples into the result table.
+		for (int i = 0; i < nt; i++) {
+			if (!s->getbyarray) {
+				lua_createtable(L, 0, nf);
+				for (int j = 0; j < nf; j++) {
+					lua_pushstring(L, columnName[j]);
+					lua_pushstring(L, PQgetvalue(result, i, j)); // TODO: Set better value
+					lua_rawset(L, -3);
+				}
+			}
+			else {
+				lua_createtable(L, nf, 0);
+				for (int j = 0; j < nf; j++) {
+					lua_pushstring(L, PQgetvalue(result, i, j)); // TODO: Set better value
+					lua_rawseti(L, -2, j+1);
+				}
+			}
+			lua_rawseti(L, -2, i+1);
+		}
 	}
 	else {
 		// Else an error condition.
 		lua_pushboolean(L, 0);
-		lua_pushstring(L, PQerrorMessage(conn));
+		lua_pushstring(L, PQerrorMessage(s->conn));
 		ret = 2;
 		if (result) PQclear(result);
 	}
@@ -136,7 +164,7 @@ getResult (lua_State *L)
 	PGresult *result = PQgetResult(s->conn);
 	// A non-null result indicates a command result to be returned.
 	if (result) {
-		return processResultStatus(L, result, PQresultStatus(result), s->conn);
+		return processResultStatus(L, result, PQresultStatus(result), s);
 	}
 	// Null pointer status indicates no more results.
 	else {
@@ -146,14 +174,14 @@ getResult (lua_State *L)
 }
 
 static int
-processResult (lua_State *L, PGresult *result, PGconn *conn)
+processResult (lua_State *L, PGresult *result, DBSession *s)
 {
 	ExecStatusType status = 0;
 
 	if (result) {
 		status = PQresultStatus(result);
 	}
-	return processResultStatus(L, result, status, conn);
+	return processResultStatus(L, result, status, s);
 }
 
 // Here, a return value of 1 indicates success and a return value of 0 indicates error.
@@ -228,7 +256,7 @@ runG (lua_State *L, int type)
 	int ret;
 	if (nargs == 2) {
 		if (type == 1) {
-			ret = processResult(L, PQexec(s->conn, command), s->conn);
+			ret = processResult(L, PQexec(s->conn, command), s);
 		}
 		else {
 			ret = processReturn(L, PQsendQuery(s->conn, command), s->conn);
@@ -240,7 +268,7 @@ runG (lua_State *L, int type)
 		if (type == 1) {
 			ret = processResult(L,
 				PQexecParams(s->conn, command, pc, NULL, pValues, NULL, NULL, 0),
-				s->conn);
+				s);
 		}
 		else {
 			ret = processReturn(L,
@@ -279,7 +307,7 @@ runGPrepared (lua_State *L, int type)
 	if (type == 1) {
 		ret = processResult(L,
 			PQexecPrepared(s->conn, sname, pc, pValues, NULL, NULL, 0),
-			s->conn);
+			s);
 	}
 	else {
 		ret = processReturn(L,
@@ -290,6 +318,15 @@ runGPrepared (lua_State *L, int type)
 	return ret;
 }
 
+// Have the results tuple keyed by array indices instead of hash names.
+static int
+arrayKeys (lua_State *L)
+{
+	DBSession *s = luaL_checkudata(L, 1, SES_REGNAME);
+	s->getbyarray = lua_toboolean(L, 2);
+	return 0;
+}
+	
 static int
 deallocatePrepared (lua_State *L)
 {
@@ -300,7 +337,7 @@ deallocatePrepared (lua_State *L)
 	values[0] = lua_tostring(L, -1);
 
 	PGresult *res = PQexecParams(s->conn, "DEALLOCATE $1", 1, NULL, values, NULL, NULL, 0);
-	return processResult(L, res, s->conn);
+	return processResult(L, res, s);
 }
 
 static int
@@ -470,6 +507,7 @@ update (lua_State *L)
 
 static const struct luaL_Reg methods [] = {
 	{"run", run},
+	{"arrayKeys", arrayKeys},
 	{"prepare", prepare},
 	{"asyncRun", asyncRun},
 	{"asyncPrepare", asyncPrepare},
