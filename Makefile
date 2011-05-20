@@ -1,17 +1,18 @@
 CC=gcc
-CFLAGS=-gdwarf-2 -g3 -pedantic -Wall -O0 -std=c99 -shared -fpic -I /usr/include/lua5.1
 
-objs := luapg.o session.o result.o common.o geotypes.o
+objs := luapg.o session.o common.o geotypes.o
 
-all: luapg.so
+all: CFLAGS=-pedantic -Wall -O2 -std=c99 -shared -fpic -I /usr/include/lua5.1
+all: luapg
 
-luapg.so: $(objs)
+debug: CFLAGS=-gdwarf-2 -g3 -pedantic -Wall -O0 -std=c99 -shared -fpic -I /usr/include/lua5.1
+debug: luapg
+
+luapg: $(objs)
 	$(CC) $(CFLAGS) $(objs) -o luapg.so -lpq -lpthread
 
 %.o: %.c %.h common.h
 	$(CC) -c $(CFLAGS) $< -o $@
-
-session.o: result.h
 
 clean:
 	rm *.o

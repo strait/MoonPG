@@ -32,6 +32,7 @@ local res,err = con:run("select count(*) from zipcodes")
 -- The number of rows returned as a number.
 assert(res[1].count == 7)
 -- successful runParams
+con:arrayKeys(true)
 res = con:run("select city from zipcodes where state = $1", 'AK')
 assert(res[1][1] == 'Seward')
 -- erronous runParams
@@ -47,6 +48,7 @@ res = prep:run('AK', 'Seward')
 assert(res[1].code == 99664)
 
 -- Prepare with no parameters.
+con:arrayKeys(false)
 prep = con:prepare("select code from zipcodes where state = 'AK'")
 res = prep:run()
 assert(res[1].code == 99664)
@@ -63,8 +65,8 @@ end
 assert(#t == 7)
 
 local t = {}
-for p in res:tuples() do
-	t[#t+1] = p[3]
+for k,v in ipairs(res) do
+	t[#t+1] = v.code
 end
 assert(#t == 7)
 
@@ -76,7 +78,7 @@ assert(#t1 == 3)
 assert(#t2 == 7)
 ]]
 -- columns
-local cols = res:fields()
+local cols = res.fields
 assert(cols[1] == 'city')
 assert(cols[3] == 'code')
 assert(cols[4] == nil)
@@ -93,9 +95,10 @@ local pr = con:prepare("insert into schedule values ($1, $2, $3)")
 local c,err = pr:run("Tupelo High", Array(days), Array(cities))
 c,err = pr:run("Nested", Array(nested), Array(cities))
 
-res = con:run"select days, cities from schedule where school = 'Tupelo High'"
+
 local arrs = "days:Array,cities:Array"
-res:setTypeMap(arrs)
+con:setTypeMap(arrs)
+res = con:run"select days, cities from schedule where school = 'Tupelo High'"
 local b = res[1].days
 local c = res[1].cities
 assert(#b == 4)
@@ -105,15 +108,12 @@ assert(type(b[2]) == 'number')
 assert(c[2] == 'Turlock')
 assert(type(c[2]) == 'string')
 
+con:setTypeMap(arrs)
 res = con:run"select days from schedule where school = 'Nested'"
-res:setTypeMap(arrs)
 b = res[1].days
 assert(#b == 2)
 assert(#b[1] == 4)
 assert(b[1][3] == 5)
--- Clear type map
-res:setTypeMap()
-assert(res[1].days == '{{1,2,5,31},{5,7,8,29}}')
 
 -- Insert and select arrays with special characters.
 
@@ -121,8 +121,9 @@ local sp1 = 'Wakup"ta,pa'
 local sp2 = '{busy} busy\\'
 cities = {sp1, nil, "", sp2}
 res, err = pr:run('Special', Array(days), Array(cities))
+con:setTypeMap(arrs)
+con:arrayKeys(false)
 res = con:run"select cities from schedule where school = 'Special'"
-res:setTypeMap(arrs)
 b = res[1].cities
 assert(b[1] == sp1)
 assert(b[2] == nil)
@@ -139,8 +140,9 @@ con:run"create table type_test (a boolean, b real, c double precision, d numeric
 p,err = con:run("insert into type_test values (TRUE, $1, $2, $3)", val1, val2, val3)
 --print(err)
 p,err = con:run("insert into type_test values (TRUE, $1, $2, $3)", val1, val1, val1)
+con:setTypeMap('d:String')
+con:arrayKeys(true)
 res,err = con:run"select * from type_test"
-res:setTypeMap('d:String')
 assert(res[1][1] == true)
 assert(res[1][2] == val1)
 assert(res[1][3] == val2)
@@ -149,6 +151,7 @@ assert(res[1][4] == val3)
 assert(res[2][4] == tostring(val1))
 -- Numeric returned as number
 val1 = 3.14159
+con:arrayKeys(false)
 con:run("insert into type_test (a, d) values (FALSE, $1)", val1)
 res = con:run"select d from type_test where a = FALSE"
 assert(res[1].d == val1)
@@ -166,8 +169,8 @@ con:run("insert into geo_test values ($1, $2, $3, $4, $5, $6)",
 	pg.Circle(31.6,48.0,5))
 con:run("insert into geo_test (t) values ($1)", pg.Path(val2, false))
 
+con:setTypeMap(arrs)
 p,err = con:run"select * from geo_test"
-p:setTypeMap(arrs)
 local point = p[1].p
 assert(point.x == 3.6)
 assert(point.y == 4.90)

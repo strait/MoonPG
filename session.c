@@ -1,5 +1,5 @@
 #include "session.h"
-#include "result.h"
+#include "geotypes.h"
 
 static int
 close (lua_State *L)
@@ -8,6 +8,9 @@ close (lua_State *L)
 	if (s->conn) {
 		PQfinish(s->conn);
 		s->conn = NULL;
+	}
+	if (s->typeMapString) {
+		free(s->typeMapString);
 	}
 	return 0;
 }
@@ -35,6 +38,88 @@ toString (lua_State *L)
 	return 1;
 }
 
+// Parse the array value items. The string position is initially on the opening brace.
+// Return a pointer to the current character position in value. (for recursive calls)
+static char *
+pushArray (lua_State *L, int typeOID, char *value)
+{
+	char *point; // Beginning of element value.
+	int inQuote = 0;
+	int index = 1;
+	int itemLen;
+	
+	point = ++value; // Scoot past the initial open brace.
+	lua_newtable(L);
+	while (*value != '\0') {
+		// Item end check
+		if (((*value == ',' || *value == '}') && !inQuote) || (*value == '"' && inQuote)) {
+			itemLen = value - point;
+			// Convert a true NULL value to Lua nil
+			if (!inQuote && itemLen == 4 && stringNamedNull(point)) {
+				lua_pushnil(L);
+			}
+			else { 
+				lua_pushlstring(L, point, itemLen);
+				const char *v = lua_tostring(L, -1);
+				switch (typeOID) {
+					case intA2OID:
+					case intA4OID:
+					case intA8OID:  
+						lua_pushnumber(L, atoi(v));
+						break;
+					case floatA4OID:
+					case floatA8OID:
+						lua_pushnumber(L, strtod(v, NULL));
+						break;
+					case boolAOID:
+						lua_pushboolean(L, strcmp(v, "t") == 0 ? 1 : 0);
+						break;
+				}
+				// If an accurate typed value was pushed, replace the string value.
+				if (lua_type(L, -1) != LUA_TSTRING) {
+					lua_replace(L, -2);
+				}
+			}
+			lua_rawseti(L, -2, index++);
+			if (inQuote) {  // Move past the ending double quote.
+				inQuote = 0;
+				value++;
+			}
+			if (*value == '}') {
+				return value;
+			}
+			point = ++value;
+		}
+		else if (inQuote) {
+			// Handle the escapes
+			if (*value == '\\') {
+				memmove(value, value + 1, strlen(value));
+			}
+			value++;
+		}
+		else if (*value == '{') {   // An inner array.
+			value = pushArray(L, typeOID, value);
+			lua_rawseti(L, -2, index++);
+			value++;
+			if (*value == ',') {
+				point = ++value;
+			}
+			else if (*value == '}') {
+				return value;
+			}
+		}
+		// Beginning quote, reset point.
+		else if (*value == '"') {
+			inQuote = 1;
+			point = ++value;
+		}
+		else {
+			value++;
+		}
+	}
+	return value;
+}
+
 // Returns a new prepare object on success.
 static int
 processPrepareStatus (lua_State *L, ExecStatusType status, DBSession *sess)
@@ -44,6 +129,8 @@ processPrepareStatus (lua_State *L, ExecStatusType status, DBSession *sess)
 		DBSession *preps = lua_newuserdata(L, sizeof *preps);
 		preps->conn = sess->conn;
 		preps->sid = sess->sid++;
+		preps->getbyarray = 0;
+		preps->typeMapString = NULL;
 		luaL_getmetatable(L, SESPREP_REGNAME);
 		lua_setmetatable(L, -2);
 	}
@@ -95,7 +182,136 @@ getPrepared (lua_State *L)
 		lua_pushnil(L);
 		return 1;
 	}
-}  
+}
+
+static int
+setTypeMap (lua_State *L)
+{
+	DBSession *s = luaL_checkudata(L, 1, SES_REGNAME);
+	const char *str = luaL_checkstring(L, 2);
+	s->typeMapString = malloc(strlen(str));
+	strcpy(s->typeMapString, str);
+	return 0;
+}
+
+// Push the value of tuple, field.
+static void
+pushValue (lua_State *L, PGresult *result, int tuple, int field, PGtype columnType, char *paramType)
+{
+	char *value;
+	if (PQgetisnull(result, tuple, field)) {
+		lua_pushnil(L);
+	}
+	else {
+		value = PQgetvalue(result, tuple, field);
+		if (paramType) {
+			// To explicitly keep as a string, numeric values that may overflow.
+			if (strcmp(paramType, "String") == 0) {
+				lua_pushstring(L, value);
+			}
+			// A special type is designated for this column.
+			else if (strcmp(paramType, "Array") == 0) {
+				pushArray(L, columnType, value);
+			}
+			// Geometric types
+			else if (strcmp(paramType, "Point") == 0) {
+				pushGeoPoint(L, value);
+			}
+			else if (strcmp(paramType, "Line") == 0) {
+				pushGeoLine(L, value);
+			}
+			else if (strcmp(paramType, "Box") == 0) {
+				pushGeoBox(L, value);
+			}
+			else if (strcmp(paramType, "Path") == 0) {
+				pushGeoPath(L, value);
+			}
+			else if (strcmp(paramType, "Polygon") == 0) {
+				pushGeoPolygon(L, value);
+			}
+			else if (strcmp(paramType, "Circle") == 0) {
+				pushGeoCircle(L, value);
+			}
+			else {
+				lua_pushstring(L, value);
+			}
+		}
+		else {
+			switch (columnType) {
+				case int2OID:
+				case int4OID:
+				case int8OID:
+					lua_pushnumber(L, atoi(value));
+					break;
+				case float4OID:
+				case float8OID:
+				case numericOID:
+					lua_pushnumber(L, strtod(value, NULL));
+					break;
+				case boolOID:
+					lua_pushboolean(L, strcmp(value, "t") == 0 ? 1 : 0);
+					break;
+				default:
+					lua_pushstring(L, value);
+			}
+		}
+	}
+}
+
+static void
+clearTypeMap (char **ptypes, int length)
+{
+	char *t;
+	for (int i = 0; i < length; i++) {
+		t = ptypes[i];
+		if (t) {
+			free(t);
+		}
+	}
+}
+
+// Helper function to parse the option between the inner separator into field_name/Type option.
+static void
+innerOption (const char *b, int nfields, char **cnames, char **ptypes)
+{
+	char *sep = strchr(b, ':');
+	if (sep) {
+		// If the field name matches a results field, then the results field position in the array
+		// gets the type option value.
+		for (int i = 0; i < nfields; i++) {
+			if (strncmp(b, cnames[i], sep - b) == 0) {
+				char **spadd = ptypes + i;
+				*spadd = malloc(strlen(sep));
+				strcpy(*spadd, sep + 1);
+			}
+		}
+	}
+}
+
+static void
+parseTypeMap(const char *typeMapString, int nfields, char **cnames, char **ptypes)
+{
+	char *sep;
+	char buf[100];
+	int span, moreOptions = 1;
+	// Parsing on special named fields.
+	while (moreOptions) {
+		sep = strchr(typeMapString, ',');
+		if (sep) {
+			span = sep - typeMapString;
+			strncpy(buf, typeMapString, span);
+			buf[span] = '\0';
+			typeMapString += span + 1;
+			innerOption(buf, nfields, cnames, ptypes);
+		}
+		else {
+			// At the end.
+			innerOption(typeMapString, nfields, cnames, ptypes);
+			moreOptions = 0;
+		}
+	}
+}
+	
 
 static int
 processResultStatus (lua_State *L, PGresult *result, ExecStatusType status, DBSession *s)
@@ -110,19 +326,26 @@ processResultStatus (lua_State *L, PGresult *result, ExecStatusType status, DBSe
 		// Create a table with all the result data
 		int nt = PQntuples(result);
 		int nf = PQnfields(result);
-		PGtype columnType[nf];
-		char *columnName[nf];
+		PGtype columnTypes[nf];
+		char *columnNames[nf];
+		char *paramTypes[nf];
 
 		lua_createtable(L, nt, 1); // Result table
 		lua_createtable(L, nf, 0); // Field names table
 
 		for(int i = 0; i < nf; i++) {
 			char *fname = PQfname(result, i);
-			columnType[i] = PQftype(result, i);
-			columnName[i] = fname;
+			columnTypes[i] = PQftype(result, i);
+			columnNames[i] = fname;
+			paramTypes[i] = 0; // To initialize
 			lua_pushstring(L, fname);
 			lua_rawseti(L, -2, i+1);
 		}
+
+		if (s->typeMapString) {
+			parseTypeMap(s->typeMapString, nf, columnNames, paramTypes);
+		}
+
 		// Insert the fieldNames table into the result table.
 		lua_pushstring(L, "fields");
 		lua_insert(L, -2);
@@ -132,19 +355,25 @@ processResultStatus (lua_State *L, PGresult *result, ExecStatusType status, DBSe
 			if (!s->getbyarray) {
 				lua_createtable(L, 0, nf);
 				for (int j = 0; j < nf; j++) {
-					lua_pushstring(L, columnName[j]);
-					lua_pushstring(L, PQgetvalue(result, i, j)); // TODO: Set better value
+					lua_pushstring(L, columnNames[j]);
+					pushValue(L, result, i, j, columnTypes[j], paramTypes[j]); 
 					lua_rawset(L, -3);
 				}
 			}
 			else {
 				lua_createtable(L, nf, 0);
 				for (int j = 0; j < nf; j++) {
-					lua_pushstring(L, PQgetvalue(result, i, j)); // TODO: Set better value
+					pushValue(L, result, i, j, columnTypes[j], paramTypes[j]); 
 					lua_rawseti(L, -2, j+1);
 				}
 			}
 			lua_rawseti(L, -2, i+1);
+		}
+
+		if (s->typeMapString) {
+			clearTypeMap(paramTypes, nf);
+			free(s->typeMapString);
+			s->typeMapString = NULL;
 		}
 	}
 	else {
@@ -437,77 +666,11 @@ backendPID (lua_State *L)
 	return 1;
 }
 
-/*
-static int
-getSQLCommand (lua_State *L, int pos, const char **command, const char ***values)
-{
-	int plen = lua_objlen(L, -1);
-	if (plen) {
-		lua_rawgeti(L, pos, 1);
-		*command = lua_tostring(L, -1);
-		if (*command) {
-			const char *val;
-			const char **vals = *values = malloc((plen - 1) * sizeof **values);
-			for (int i = 2; i <= plen; i++) {
-				lua_rawgeti(L, pos, i);
-				val = getPFS(L, -1);
-				if (val) {
-					vals[2 - i] = val;
-				}
-				else {
-					luaL_error(L, "Not a valid parameter at position %i", 2 - i);
-				}
-			}
-		}
-		else {
-			luaL_error(L, "Not a valid string for the SQL command.");
-		}
-	}
-	else {
-		luaL_error(L, "Update must be called with 2 command tables.");
-	}
-	return plen;
-}
-
-static int
-preUpdate (DBSession *s, const char *command, int pc, const char **vals)
-{
-	char newCommand[strlen(command) + 6] = "BEGIN;"
-	strcat(newCommand, command);
-	PGresult *res = PQexecParams(s->conn, command, pc, NULL, vals, NULL, NULL, 0);
-	if (PQresultStatus(res) != PGRES_TUPLES_OK) {
-		
-static int
-update (lua_State *L)
-{
-	if (lua_isfunction(L, 2) && lua_istable(L, 3) && lua_istable(L, 4)) {
-		DBSession *s = luaL_checkudata(L, 1, SES_REGNAME);
-		const char *command1, *command2;
-		const char **vals1 = NULL, **vals2 = NULL;
-		int pc1 = getSQLCommand(L, 3, &command1, &vals1);
-		int pc2 = getSQLCommand(L, 4, &command2, &vals2);
-		// Given a get query to run.
-		int nps = preUpdate(s, command1, pc1, vals1);
-		lua_pushvalue(L, 2);
-		lua_insert(L, -nps - 1);
-		lua_call(L, nps, pc2);
-		postUpdate(s, command2, pc2, vals2);
-		
-		free(vals1);
-		free(vals2);
-	}
-	else {
-		luaL_error(L, "Argument error.");
-	}
-	return 0;
-}
-			
-	*/  
-		
 
 static const struct luaL_Reg methods [] = {
 	{"run", run},
 	{"arrayKeys", arrayKeys},
+	{"setTypeMap", setTypeMap},
 	{"prepare", prepare},
 	{"asyncRun", asyncRun},
 	{"asyncPrepare", asyncPrepare},
