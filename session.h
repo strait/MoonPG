@@ -1,7 +1,7 @@
 #include "common.h"
 
-#define SES_REGNAME "luapg.session"
-#define SESPREP_REGNAME "luapg.sessionprep"
+#define SES_REGNAME "moonpg.session"
+#define SESPREP_REGNAME "moonpg.sessionprep"
 
 typedef enum {
 	boolOID = 16,

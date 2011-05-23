@@ -1,4 +1,4 @@
-local pg = require'luapg'
+local pg = require'moonpg'
 
 local con = pg.connect('dbname=postgres')
 

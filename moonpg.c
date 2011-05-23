@@ -63,11 +63,11 @@ static const struct luaL_Reg funcs [] =
 };
 
 int
-luaopen_luapg (lua_State *L)
+luaopen_moonpg (lua_State *L)
 {
 	void registerSession (lua_State *L);
 
 	registerSession(L);
-	luaL_register(L, "luapg", funcs);
+	luaL_register(L, "moonpg", funcs);
 	return 1;
 }

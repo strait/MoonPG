@@ -1,23 +1,23 @@
 =S1 NAME
 
-luapg - a full-featured Postgresql client interface for Lua
+moonpg - a full-featured Postgresql client interface for Lua
 
 =S1 SYNOPSIS
 
-	require 'luapg'
+	require 'moonpg'
 
 =S2 Example program
 
-	local lp = require 'luapg'
+	local lp = require 'moonpg'
 	
 	local con = lp.connect("dbname=postgres")
 	result = con:run("select city from zipcodes where state = $1", "CA")
 
-=S1 About LuaPG
+=S1 About MoonPG
 
-LuaPG is a full-featured Postgresql client library for Lua written against the
+MoonPG is a full-featured Postgresql client library for Lua written against the
 Ln[libpq|http://www.postgresql.org/docs/8.4/interactive/libpq.html] C library.  Many of
-the conventions of this C library are carried over into LuaPG, so you will be asked to
+the conventions of this C library are carried over into MoonPG, so you will be asked to
 refer to the `libpg` reference section of the PostgreSQL documentation for more
 detailed usage information.  
 
@@ -49,11 +49,11 @@ Lua types.  See the documentation for the result object method, Ln[setTypeMap|re
 
 =S2 Database Connection
 
-The LuaPG library provides one main `connect` function for connecting to a database.
+The MoonPG library provides one main `connect` function for connecting to a database.
 
 =list
 
-* luapg.connect (connInfo)
+* moonpg.connect (connInfo)
 
 The `connInfo` parameter is a connection string consisting of a space separated `keyword
 = value` set of parameters. Any number of parameters can be left out and the connection
