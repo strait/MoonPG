@@ -4,14 +4,14 @@ moonpg - a full-featured Postgresql client interface for Lua
 
 =S1 SYNOPSIS
 
-	require 'moonpg'
+    require 'moonpg'
 
 =S2 Example program
 
-	local lp = require 'moonpg'
-	
-	local con = lp.connect("dbname=postgres")
-	result = con:run("select city from zipcodes where state = $1", "CA")
+    local lp = require 'moonpg'
+    
+    local con = lp.connect("dbname=postgres")
+    result = con:run("select city from zipcodes where state = $1", "CA")
 
 =S1 About MoonPG
 
@@ -97,12 +97,12 @@ value as a boolean, will indicate whether the command was run successfully or no
 `false` value is returned, then an error message string is also returned as the second
 value.
 
-	local result, error = con:run("select code from zipcodes where city = 'Denver'")
-	if result then
-	  print(result.code)
-	else
-	  print("Error in query: " .. error)
-	end
+    local result, error = con:run("select code from zipcodes where city = 'Denver'")
+    if result then
+      print(result.code)
+    else
+      print("Error in query: " .. error)
+    end
 
 =S3 Parameter replacement values
 
@@ -110,18 +110,18 @@ The command string placeholders are
 entered as such, ($1, $2, ...), to indicate the location that the parameter values will
 fill before running the command.  For example:  
 
-	local city = "Why"
-	local state = "AZ"
-	local code = 85321
-	con:run("insert into zipcodes values ($1, $2, $3)", city, state, code)
+    local city = "Why"
+    local state = "AZ"
+    local code = 85321
+    con:run("insert into zipcodes values ($1, $2, $3)", city, state, code)
 
 This will have the same effect as running:
 
-	con:run("insert into zipcodes values ('Why', 'AZ', '85321')")
+    con:run("insert into zipcodes values ('Why', 'AZ', '85321')")
 
 -or-
 
-	con:run("insert into zipcodes values ('" .. city .. "', '" .. state .. "', '" .. code .. "')")
+    con:run("insert into zipcodes values ('" .. city .. "', '" .. state .. "', '" .. code .. "')")
 
 However, there are advantages for separating parameter values from the command string,
 such as avoiding the tedious and error-prone quoting and escaping that is usually
@@ -138,9 +138,9 @@ command at a later time. This feature allows commands that will be used repeated
 parsed and planned on the database server just once, rather than each time they are
 executed. The command string must be a single SQL command.
 
-	local prep = con:prepare("select code from zipcodes where city = $1")
-	-- Some later time
-	local result = prep:run("Denver")
+    local prep = con:prepare("select code from zipcodes where city = $1")
+    -- Some later time
+    local result = prep:run("Denver")
 
 =S3 Executing a Prepared Statement
 
@@ -167,14 +167,14 @@ A successful query will return 0 or more tuples (rows) accessed by the result ob
 returned from the `run` method. The result object has the tuples enumerated like an array table,
 starting from 1, with `#result` being the number of tuples in the result set.
 
-	local result, error = con:run("select city, state, code from zipcodes")
-	if result then
-	  for i = 1,#result do
-		  print(result[i].city .. " has zipcode " .. result[i][3])
-	  end
-	else
-	  print("Error in query: " .. error)
-	end
+    local result, error = con:run("select city, state, code from zipcodes")
+    if result then
+      for i = 1,#result do
+          print(result[i].city .. " has zipcode " .. result[i][3])
+      end
+    else
+      print("Error in query: " .. error)
+    end
 
 This example highlights the way to retrieve query results directly.  Tuples are indexed
 like an array and field (column) values can either be accessed by index or by name. In
@@ -189,23 +189,23 @@ The result object provides several methods for operating on the result set.
 
 Returns an iterator object for iterating through each result tuple.
 
-	local result, error = con:run("select city, state, code from zipcodes")
-	if result then
-		for row in result:tuples() do
-			print(row.city .. " has zipcode " .. row.code)
-		end
-	else
-		print("Error in query: " .. error)
-	end
+    local result, error = con:run("select city, state, code from zipcodes")
+    if result then
+        for row in result:tuples() do
+            print(row.city .. " has zipcode " .. row.code)
+        end
+    else
+        print("Error in query: " .. error)
+    end
 
 * result:fields ()
 
 Returns an array of field names for this query result.
 
-	local fields = result:fields()
-	for i = 1,#fields do
-		print(fields[i])
-	end
+    local fields = result:fields()
+    for i = 1,#fields do
+        print(fields[i])
+    end
 
 * result:setTypeMap ([mapString])
 
@@ -225,13 +225,13 @@ might not fit into a Lua `number` (double-precision floating-point), then you wi
 
 The `mapString` argument has the format:
 
-	fieldName1:specialType,fieldName2:specialType,...
+    fieldName1:specialType,fieldName2:specialType,...
 
 In the example of a result set with a field named `amount` and with a database type of
 `numeric`, by default, the `amount` field value will be retrieved as a Lua `number`.
 To set the result object for retrieving this field value as a lua `string`:  
 
-	result.setTypeMap("amount:String")
+    result.setTypeMap("amount:String")
 
 Then go about retrieving values from the result object as usual.
 
@@ -260,9 +260,9 @@ when you need a transaction to include many separated commands/queries you may e
 your own transaction boundaries by explicitly embedding `BEGIN;` and `COMMIT;` in your
 command strings.
 
-	local result = con:run("BEGIN; select code from zipcodes where city = $1", city)
-	-- Misc processing
-	con:run("update zipcodes set code = $1 where city = $2; COMMIT", newcode, city)
+    local result = con:run("BEGIN; select code from zipcodes where city = $1", city)
+    -- Misc processing
+    con:run("update zipcodes set code = $1 where city = $2; COMMIT", newcode, city)
 
 This example runs both commands within the same transaction, delineated by the `BEGIN;`
 and `COMMIT;`  commands. Leaving out these commands would have put each command in its

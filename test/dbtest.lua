@@ -4,29 +4,29 @@ local Array = pg.Array
 local con = pg.connect('dbname=postgres')
 
 function assert (cond, message)
-	if not cond then
-		if not message then message = 'assertion failed!' end
-		con:run"drop table zipcodes"
-		error(message)
-	end
+    if not cond then
+        if not message then message = 'assertion failed!' end
+        con:run"drop table zipcodes"
+        error(message)
+    end
 end
 
 -- Testing with the zipcodes table
 local codes = {
-	{'Joppa', 'AL', 35087},
-	{'Seward', 'AK', 99664},
-	{'Why', 'AZ', 85321},
-	{'Guy', 'AR', 72061},
-	{'Why', 'AZ', 85321},
-	{'Loma Linda', 'CA', 92354},
-	{'Eagle', 'CO', 81631},
+    {'Joppa', 'AL', 35087},
+    {'Seward', 'AK', 99664},
+    {'Why', 'AZ', 85321},
+    {'Guy', 'AR', 72061},
+    {'Why', 'AZ', 85321},
+    {'Loma Linda', 'CA', 92354},
+    {'Eagle', 'CO', 81631},
 }
 
 local n, err = con:run"create table zipcodes (city varchar(30), state char(2), code integer);"
 for i = 1,#codes do
-	local c = codes[i]
-	local v,err = con:run("insert into zipcodes values ($1, $2, $3);", c[1], c[2], c[3])
-	if not v then print(err) end
+    local c = codes[i]
+    local v,err = con:run("insert into zipcodes values ($1, $2, $3);", c[1], c[2], c[3])
+    if not v then print(err) end
 end
 local res,err = con:run("select count(*) from zipcodes")
 -- The number of rows returned as a number.
@@ -60,13 +60,13 @@ res = con:run("select * from zipcodes")
 
 local t = {}
 for p=1,#res do
-	t[#t+1] = res[p].code
+    t[#t+1] = res[p].code
 end
 assert(#t == 7)
 
 local t = {}
 for k,v in ipairs(res) do
-	t[#t+1] = v.code
+    t[#t+1] = v.code
 end
 assert(#t == 7)
 
@@ -165,8 +165,8 @@ local val1 = {{34,56},{1,78.4}}
 local val2 = {{34,56},{1,78.4},{98,99}}
 local val3 = {{42,902},{4,3.1456},{2.181,9}}
 con:run("insert into geo_test values ($1, $2, $3, $4, $5, $6)",
-	pg.Point(3.6,4.90), pg.Line(54.6, 8, 99.0, 8), pg.Box(val1), pg.Path(val2, true), pg.Polygon(val3),
-	pg.Circle(31.6,48.0,5))
+    pg.Point(3.6,4.90), pg.Line(54.6, 8, 99.0, 8), pg.Box(val1), pg.Path(val2, true), pg.Polygon(val3),
+    pg.Circle(31.6,48.0,5))
 con:run("insert into geo_test (t) values ($1)", pg.Path(val2, false))
 
 con:setTypeMap(arrs)
